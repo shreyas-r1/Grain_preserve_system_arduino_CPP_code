@@ -1,0 +1,77 @@
+#include <LiquidCrystal.h>
+#include <DHT.h>
+
+// Pin Configuration for Sensors
+#define DHT1_PIN A0
+#define DHT2_PIN A1
+#define DHT3_PIN A3 // Third DHT sensor
+#define SOIL_PIN A2
+#define DHTTYPE DHT11
+
+// DHT Sensors Initialization
+DHT dht1(DHT1_PIN, DHTTYPE);
+DHT dht2(DHT2_PIN, DHTTYPE);
+DHT dht3(DHT3_PIN, DHTTYPE);
+
+// LCD Initialization
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+
+void setup() {
+  Serial.begin(9600); // Communication with ESP8266
+  dht1.begin();
+  dht2.begin();
+  dht3.begin(); // Start third sensor
+
+  // Initialize LCD
+  lcd.begin(16, 2);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("System Ready");
+  delay(2000); // Delay to allow the system to stabilize
+}
+
+void loop() {
+  // Read temperature and humidity from sensors
+  float temp1 = dht1.readTemperature();
+  float hum1 = dht1.readHumidity();
+  float temp2 = dht2.readTemperature();
+  float hum2 = dht2.readHumidity();
+  float temp3 = dht3.readTemperature(); // Third sensor temperature
+  float hum3 = dht3.readHumidity();     // Third sensor humidity
+
+  // Read soil moisture
+  int soilMoisture = analogRead(SOIL_PIN);
+
+  // Check for failed sensor readings
+  if (isnan(temp1) || isnan(hum1) || isnan(temp2) || isnan(hum2) || isnan(temp3) || isnan(hum3)) {
+    lcd.clear();
+    lcd.print("Sensor Error");
+    Serial.println("Failed to read from one or more sensors.");
+    delay(2000); // Wait before retrying
+    return;      // Skip sending data if any sensor failed
+  }
+
+  // Prepare data string to send to ESP8266
+  String data = "T1:" + String(temp1, 2) + ",H1:" + String(hum1, 2) + 
+                ",T2:" + String(temp2, 2) + ",H2:" + String(hum2, 2) + 
+                ",T3:" + String(temp3, 2) + ",H3:" + String(hum3, 2) + 
+                ",Soil:" + String(soilMoisture);
+
+  // Transmit sensor data to ESP8266
+  Serial.println(data);
+
+  // Display data on LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("T1:");
+  lcd.print(temp1, 2);
+  lcd.print("C H1:");
+  lcd.print(hum1, 2);
+  lcd.setCursor(0, 1);
+  lcd.print("T2:");
+  lcd.print(temp2, 2);
+  lcd.print("C S:");
+  lcd.print(soilMoisture);
+
+  delay(2000); // Wait for 2 seconds before the next reading
+}
