@@ -1,0 +1,125 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+
+// Wi-Fi credentials
+const char* ssid = "DUMMY_NAME/ wifi name";          // Replace with  WiFi SSID
+const char* password = "123456789";  // Replace with your WiFi pass
+
+// ThingSpeak API details
+const char* server = "http://api.thingspeak.com";
+const char* apiKey = "THINGSPEAK API GOES HERE, for ref";          // Replace with Write API Key
+
+WiFiClient client; // Create WiFiClient instance
+
+String incomingData = ""; // Buffer to store incoming serial data
+
+void setup() {
+  Serial.begin(9600);  // Serial Monitor for RX data
+  Serial.println("Starting ESP8266...");
+
+  // Connect to Wi-Fi
+  Serial.println("Connecting to Wi-Fi...");
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(".");
+  }
+  Serial.println("\nWi-Fi Connected!");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void loop() {
+  // Check for incoming serial data
+  while (Serial.available()) {
+    char incomingChar = Serial.read(); // Read each character
+    incomingData += incomingChar;
+
+    // If a newline character is detected, process the data
+    if (incomingChar == '\n') {
+      processSensorData(incomingData);  // Process incoming data
+      incomingData = ""; // Clear the buffer
+    }
+  }
+
+  delay(200); // Prevent overwhelming the loop
+}
+
+void processSensorData(String data) {
+  // Extract temperature, humidity, and soil moisture values from the string
+  float T1 = extractValue(data, "T1:");
+  float H1 = extractValue(data, "H1:");
+  float T2 = extractValue(data, "T2:");
+  float H2 = extractValue(data, "H2:");
+  float T3 = extractValue(data, "T3:"); // Third DHT temperature
+  float H3 = extractValue(data, "H3:"); // Third DHT humidity
+  int soilMoisture = extractIntValue(data, "Soil:");
+
+  // Status Flag: Check if all sensor values are valid
+  int statusFlag = (!isnan(T1) && !isnan(H1) && !isnan(T2) && 
+                    !isnan(H2) && !isnan(T3) && !isnan(H3) && soilMoisture > 0) ? 1 : 0;
+
+  // Debugging: Print the extracted data
+  Serial.println("Extracted Data:");
+  Serial.print("T1: "); Serial.println(T1);
+  Serial.print("H1: "); Serial.println(H1);
+  Serial.print("T2: "); Serial.println(T2);
+  Serial.print("H2: "); Serial.println(H2);
+  Serial.print("T3: "); Serial.println(T3);
+  Serial.print("H3: "); Serial.println(H3);
+  Serial.print("Soil Moisture: "); Serial.println(soilMoisture);
+  Serial.print("Status Flag: "); Serial.println(statusFlag);
+
+  // Send the data to ThingSpeak
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    String url = String(server) + "/update?api_key=" + apiKey + 
+                 "&field1=" + T1 + "&field2=" + H1 + 
+                 "&field3=" + soilMoisture + "&field4=" + T2 + 
+                 "&field5=" + H2 + "&field6=" + T3 + 
+                 "&field7=" + H3 + "&field8=" + statusFlag;
+    http.begin(client, url);
+
+    int httpCode = http.GET(); // Make GET request
+
+    if (httpCode > 0) {
+      Serial.print("HTTP Response Code: ");
+      Serial.println(httpCode);
+      if (httpCode == HTTP_CODE_OK) {
+        Serial.println("Data sent successfully to ThingSpeak!");
+      }
+    } else {
+      Serial.print("Error in sending data: ");
+      Serial.println(http.errorToString(httpCode).c_str());
+    }
+    http.end(); // Close connection
+  } else {
+    Serial.println("Wi-Fi Disconnected. Attempting to reconnect...");
+    WiFi.begin(ssid, password);
+  }
+}
+
+// Helper function to extract float values from the incoming string
+float extractValue(String data, String key) {
+  int startIndex = data.indexOf(key);
+  if (startIndex != -1) {
+    int endIndex = data.indexOf(",", startIndex);
+    if (endIndex == -1) endIndex = data.length(); // Handle the last value
+    String value = data.substring(startIndex + key.length(), endIndex);
+    return value.toFloat();
+  }
+  return NAN; // Return NAN if key not found
+}
+
+// Helper function to extract integer values from the incoming string
+int extractIntValue(String data, String key) {
+  int startIndex = data.indexOf(key);
+  if (startIndex != -1) {
+    int endIndex = data.indexOf(",", startIndex);
+    if (endIndex == -1) endIndex = data.length(); // Handle the last value
+    String value = data.substring(startIndex + key.length(), endIndex);
+    return value.toInt();
+  }
+  return -1; // Return -1 if key not found
+}
