@@ -1,5 +1,5 @@
 ======================================
-IoT Grain Handling & Preservation System
+IoT Based Grain Preservation System
 ======================================
 
 This project is an automated system designed to manage and preserve grain by monitoring environmental conditions and controlling material flow. It integrates a conveyor belt for grain transport with a climate control system to prevent spoilage. A cloud-based dashboard provides comprehensive remote monitoring and data analysis.
