@@ -1,0 +1,234 @@
+#include <Servo.h>
+
+// Conveyor Motor Driver Pins
+#define ENB2 6      // Enable Pin for Conveyor Motor Driver (PWM)
+#define IN1_2 7     // Control Pin for Conveyor Motor Driver (IN1)
+#define IN2_2 8     // Control Pin for Conveyor Motor Driver (IN2)
+
+// Pins for UV Light, SSR Relay, and Servo Motor
+#define UV_PIN 2    // Pin to control UV Light
+#define SSR_PIN 4   // Pin to control SSR Relay
+#define SERVO_PIN 5 // Pin to control Servo Motor
+
+// Thresholds
+#define TEMP_THRESHOLD 35
+#define SSR_TOGGLE_ON_TIME 20000  // SSR ON duration in milliseconds
+#define SSR_TOGGLE_OFF_TIME 1500 // SSR OFF duration in milliseconds
+
+// Servo Object
+Servo servoMotor;
+
+// Variables
+float dht1_temp = 0.0, dht1_hum = 0.0;
+float dht2_temp = 0.0, dht2_hum = 0.0;
+float dht3_temp = 0.0, dht3_hum = 0.0;
+int soil_moisture = 0;
+
+// Servo and Conveyor Control Variables
+bool servoActive = false;
+unsigned long servoStartTime = 0;
+const unsigned long servoDuration = 1000; // Servo operation duration (ms)
+
+// SSR Control Variables
+bool ssrState = false;
+unsigned long ssrLastToggleTime = 0;
+
+// Function Prototypes
+void parseSensorData(String data);
+void initializeServo();
+void startServo();
+void handleServo();
+void startConveyor(int duration);
+void stopConveyor();
+void vibrateConveyorWithSSR(int duration);
+void controlUV(bool state);
+void monitorData();
+
+void setup() {
+  Serial.begin(9600);
+
+  // Initialize Conveyor Motor Pins
+  pinMode(ENB2, OUTPUT);
+  pinMode(IN1_2, OUTPUT);
+  pinMode(IN2_2, OUTPUT);
+
+  // Initialize UV Light and SSR Pins
+  pinMode(UV_PIN, OUTPUT);
+  pinMode(SSR_PIN, OUTPUT);
+
+  // Initialize Servo
+  servoMotor.attach(SERVO_PIN);
+  initializeServo();
+
+  // Ensure all components are off initially
+  digitalWrite(UV_PIN, LOW);
+  digitalWrite(SSR_PIN, LOW);
+  stopConveyor(); // Ensure conveyor is off at start
+
+  Serial.println("UNO_2 Ready");
+}
+
+bool initializationDone = false; // Flag to track initialization
+
+void loop() {
+  if (!initializationDone) {
+    // Step 2: Wait for 10 seconds for initialization
+    Serial.println("Initialization delay...");
+    delay(10000);
+    initializationDone = true; // Mark initialization as done
+    Serial.println("Initialization complete.");
+  }
+
+  if (Serial.available() > 0) {
+    String data = Serial.readStringUntil('\n');
+    data.trim(); // Remove extra whitespace
+    parseSensorData(data); // Extract sensor data
+
+    // Monitor and perform actions
+    if (dht3_temp < 35.0) {
+      monitorData();
+      // Turn SSR ON until DHT3 temperature reaches 31 degrees
+      digitalWrite(SSR_PIN, HIGH);
+      delay(500); // Short delay to allow SSR to stay on
+    } else {
+      digitalWrite(SSR_PIN, LOW);
+      // Perform the remaining operations as usual
+      if (dht3_temp >= TEMP_THRESHOLD) {
+        digitalWrite(SSR_PIN, LOW);
+
+        // Rotate Servo and Start Conveyor
+        controlUV(true); // Turn UV ON when conveyor starts
+        startConveyor(11600);
+        startServo(); // Trigger servo in parallel
+
+        // Vibrate Conveyor with SSR Control
+        vibrateConveyorWithSSR(30000);
+        controlUV(false); // Turn UV OFF after vibration
+
+        // Final Conveyor Rotation
+        controlUV(true); // Turn UV ON again
+        startConveyor(18500);
+        controlUV(false); // Turn UV OFF after conveyor stops
+
+        // Close the Servo After Final Stage
+        servoMotor.write(180); // Close the servo to prevent grain spillage
+        Serial.println("Servo Closed After Cycle");
+      }
+    }
+  }
+
+  handleServo(); // Check and handle servo operation
+
+}
+
+// Function Definitions
+
+// Initialize servo to 180 degrees and reset to 0 degrees
+void initializeServo() {
+  servoMotor.write(0); // Ensure servo is closed initially
+  delay(500);
+}
+
+// Parse incoming sensor data and extract values
+void parseSensorData(String data) {
+  int t1Start = data.indexOf("T1:") + 3;
+  int t1End = data.indexOf(",", t1Start);
+  int h1Start = data.indexOf("H1:") + 3;
+  int h1End = data.indexOf(",", h1Start);
+  int t2Start = data.indexOf("T2:") + 3;
+  int t2End = data.indexOf(",", t2Start);
+  int h2Start = data.indexOf("H2:") + 3;
+  int h2End = data.indexOf(",", h2Start);
+  int t3Start = data.indexOf("T3:") + 3;
+  int t3End = data.indexOf(",", t3Start);
+  int h3Start = data.indexOf("H3:") + 3;
+  int h3End = data.indexOf(",", h3Start);
+  int soilStart = data.indexOf("Soil:") + 5;
+
+  if (t1Start > 2) dht1_temp = data.substring(t1Start, t1End).toFloat();
+  if (h1Start > 2) dht1_hum = data.substring(h1Start, h1End).toFloat();
+  if (t2Start > 2) dht2_temp = data.substring(t2Start, t2End).toFloat();
+  if (h2Start > 2) dht2_hum = data.substring(h2Start, h2End).toFloat();
+  if (t3Start > 2) dht3_temp = data.substring(t3Start, t3End).toFloat();
+  if (h3Start > 2) dht3_hum = data.substring(h3Start, h3End).toFloat();
+  if (soilStart > 2) soil_moisture = data.substring(soilStart).toInt();
+}
+
+// Monitor and print sensor data
+void monitorData() {
+  Serial.println("=== Monitoring Data ===");
+  Serial.print("DHT1: Temp = "); Serial.print(dht1_temp); Serial.print("°C, Hum = "); Serial.println(dht1_hum);
+  Serial.print("DHT2: Temp = "); Serial.print(dht2_temp); Serial.print("°C, Hum = "); Serial.println(dht2_hum);
+  Serial.print("DHT3: Temp = "); Serial.print(dht3_temp); Serial.print("°C, Hum = "); Serial.println(dht3_hum);
+  Serial.print("GRAIN Moisture = "); Serial.println(soil_moisture);
+  Serial.println("========================");
+  delay(3000); // Wait for 3 seconds before next monitoring
+}
+
+// Start servo operation
+void startServo() {
+  servoActive = true;
+  servoStartTime = millis();
+  servoMotor.write(0); // Open servo
+}
+
+// Handle servo operation in non-blocking mode
+void handleServo() {
+  if (servoActive && (millis() - servoStartTime >= servoDuration)) {
+    servoMotor.write(90); // Reset servo to initial position
+    servoActive = false; // Reset flag
+  }
+}
+
+// Start conveyor for a specified duration
+void startConveyor(int duration) {
+  analogWrite(ENB2, 255);
+  digitalWrite(IN1_2, HIGH);
+  digitalWrite(IN2_2, LOW);
+  delay(duration);
+  stopConveyor();
+}
+
+// Stop conveyor
+void stopConveyor() {
+  analogWrite(ENB2, 0);
+  digitalWrite(IN1_2, LOW);
+  digitalWrite(IN2_2, LOW);
+  Serial.println("Conveyor Stopped");
+}
+
+// Vibrate conveyor with parallel SSR control
+void vibrateConveyorWithSSR(int duration) {
+  unsigned long vibrationStartTime = millis();
+  while (millis() - vibrationStartTime < duration) {
+    // Forward motion
+    analogWrite(ENB2, 255);
+    digitalWrite(IN1_2, HIGH);
+    digitalWrite(IN2_2, LOW);
+    delay(105);
+
+    // Reverse motion
+    analogWrite(ENB2, 255);
+    digitalWrite(IN1_2, LOW);
+    digitalWrite(IN2_2, HIGH);
+    delay(100);
+
+    // Stop motion briefly
+    analogWrite(ENB2, 0);
+    delay(10);
+
+    // Parallel SSR control
+    unsigned long currentTime = millis();
+    if (currentTime - ssrLastToggleTime >= (ssrState ? SSR_TOGGLE_ON_TIME : SSR_TOGGLE_OFF_TIME)) {
+      ssrState = !ssrState; // Toggle SSR state
+      digitalWrite(SSR_PIN, ssrState ? HIGH : LOW);
+      ssrLastToggleTime = currentTime;
+    }
+  }
+}
+
+// Control UV light
+void controlUV(bool state) {
+  digitalWrite(UV_PIN, state ? HIGH : LOW);
+  Serial.println(state ? "UV Light Activated" : "UV Light Deactivated");
+}
